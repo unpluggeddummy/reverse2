@@ -1,0 +1,49 @@
+# Live2D 모델 채우기 (두 번째 보관함) — 첫 보관함(reverse)에 다 못 담은 모델만 담는다.
+# 매주 월요일 아침(한국 시간 07:37, 첫 보관함 다음) 자동, Actions 탭에서 직접 실행도 가능.
+name: Live2D 채우기 (2)
+
+on:
+  schedule:
+    - cron: "37 22 * * 0"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "이미 담은 모델도 모두 다시 만들기 (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-live2d
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow
+      - name: 중섭 에셋 저장소에서 Live2D 폴더만 받기
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/myssal/Reverse-1999-CN-Asset.git ../cn
+          cd ../cn && git sparse-checkout set live2d/roles
+      - name: 나눠서 담고 올리기 (한 번에 40개씩)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          FORCE=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then FORCE="--force"; rm -rf live2d; fi
+          for i in $(seq 1 12); do
+            python3 scripts/sync_live2d.py --cn ../cn --out . --max-new 40 --skip-from https://raw.githubusercontent.com/unpluggeddummy/reverse/main/live2d/index.json $FORCE
+            FORCE=""
+            git add live2d
+            if git diff --cached --quiet; then echo "더 담을 것 없음"; break; fi
+            git commit -m "Live2D 채우기 ($i)"
+            git push
+          done
